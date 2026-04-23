@@ -21,7 +21,7 @@ public static class DbInitializer
             .RuleFor(m => m.Manufacturer, f => f.Company.CompanyName())
             .RuleFor(m => m.Price, f => f.Random.Decimal(1m, 500m))
             .RuleFor(m => m.StockQuantity, f => f.Random.Int(0, 500))
-            .RuleFor(m => m.ExpiryDate, f => f.Date.Future(2))
+            .RuleFor(m => m.ExpiryDate, f => DateTime.SpecifyKind(f.Date.Future(2), DateTimeKind.Utc))
             .RuleFor(m => m.RequiresPrescription, f => f.Random.Bool())
             .RuleFor(m => m.Category, f => f.PickRandom<Category>());
 
@@ -36,8 +36,8 @@ public static class DbInitializer
             .RuleFor(p => p.PatientPhone, f => f.Phone.PhoneNumber())
             .RuleFor(p => p.DoctorName, f => $"Dr. {f.Name.FullName()}")
             .RuleFor(p => p.DoctorLicense, f => f.Random.Replace("LIC-####-####"))
-            .RuleFor(p => p.IssuedDate, f => f.Date.Past(1))
-            .RuleFor(p => p.ExpiresDate, (f, p) => p.IssuedDate.AddDays(30))
+            .RuleFor(p => p.IssuedDate, f => DateTime.SpecifyKind(f.Date.Past(1), DateTimeKind.Utc))
+            .RuleFor(p => p.ExpiresDate, (f, p) => DateTime.SpecifyKind(p.IssuedDate.AddDays(30), DateTimeKind.Utc))
             .RuleFor(p => p.Status, f => f.PickRandom<PrescriptionStatus>());
 
         var prescriptions = prescriptionFaker.Generate(3000);
@@ -63,7 +63,7 @@ public static class DbInitializer
 
         var saleFaker = new Faker<Sale>()
             .RuleFor(s => s.Id, f => f.Random.Guid())
-            .RuleFor(s => s.SoldAt, f => f.Date.Recent(30))
+            .RuleFor(s => s.SoldAt, f => DateTime.SpecifyKind(f.Date.Recent(30), DateTimeKind.Utc))
             .RuleFor(s => s.TotalAmount, 0m); // Calculated later
 
         var sales = saleFaker.Generate(5000);
