@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -23,6 +25,13 @@ public class PharmacyApiTests : IAsyncLifetime
 
     private HttpClient _httpClient = null!;
     private WebApplicationFactory<Program> _factory = null!;
+
+    // Must match the API's serialization settings (enums as strings)
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
 
     public async Task InitializeAsync()
     {
@@ -61,7 +70,6 @@ public class PharmacyApiTests : IAsyncLifetime
     [Fact]
     public async Task PostSale_WithoutPrescription_WhenRequiresPrescription_ShouldReturnBadRequest()
     {
-        // Get a medicine that requires prescription
         using var scope = _factory.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<PharmacyDbContext>();
         var medicine = await context.Medicines.FirstAsync(m => m.RequiresPrescription && m.StockQuantity > 0);
@@ -83,7 +91,6 @@ public class PharmacyApiTests : IAsyncLifetime
     [Fact]
     public async Task PostSale_WithValidPrescription_ShouldReturnOk()
     {
-        // Arrange: find a medicine that requires prescription and has stock
         using var scope = _factory.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<PharmacyDbContext>();
 
@@ -106,7 +113,7 @@ public class PharmacyApiTests : IAsyncLifetime
         var prescriptionResponse = await _httpClient.PostAsJsonAsync("/api/prescriptions", prescription);
         prescriptionResponse.StatusCode.Should().Be(HttpStatusCode.Created);
 
-        var createdPrescription = await prescriptionResponse.Content.ReadFromJsonAsync<Prescription>();
+        var createdPrescription = await prescriptionResponse.Content.ReadFromJsonAsync<Prescription>(JsonOptions);
 
         // Act: sell using the prescription
         var saleRequest = new SaleRequest
@@ -120,7 +127,6 @@ public class PharmacyApiTests : IAsyncLifetime
 
         var saleResponse = await _httpClient.PostAsJsonAsync("/api/sales", saleRequest);
 
-        // Assert
         saleResponse.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
@@ -130,7 +136,7 @@ public class PharmacyApiTests : IAsyncLifetime
         var response = await _httpClient.GetAsync("/api/sales");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var sales = await response.Content.ReadFromJsonAsync<List<Sale>>();
+        var sales = await response.Content.ReadFromJsonAsync<List<Sale>>(JsonOptions);
         sales.Should().NotBeNull();
         sales!.Count.Should().BeGreaterThan(0);
     }
@@ -143,7 +149,7 @@ public class PharmacyApiTests : IAsyncLifetime
         var response = await _httpClient.GetAsync("/api/medicines?category=Antibiotic");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var medicines = await response.Content.ReadFromJsonAsync<List<Medicine>>();
+        var medicines = await response.Content.ReadFromJsonAsync<List<Medicine>>(JsonOptions);
         medicines.Should().NotBeNull();
         medicines!.Should().OnlyContain(m => m.Category == Category.Antibiotic);
     }
@@ -154,9 +160,8 @@ public class PharmacyApiTests : IAsyncLifetime
         var response = await _httpClient.GetAsync("/api/medicines/expiring?days=365");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var medicines = await response.Content.ReadFromJsonAsync<List<Medicine>>();
+        var medicines = await response.Content.ReadFromJsonAsync<List<Medicine>>(JsonOptions);
         medicines.Should().NotBeNull();
-        // With 2000 medicines and expiry within 2 years, we should have some expiring in the next year
         medicines!.Count.Should().BeGreaterThan(0);
     }
 
@@ -166,9 +171,8 @@ public class PharmacyApiTests : IAsyncLifetime
         var response = await _httpClient.GetAsync("/api/medicines/low-stock");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var medicines = await response.Content.ReadFromJsonAsync<List<Medicine>>();
+        var medicines = await response.Content.ReadFromJsonAsync<List<Medicine>>(JsonOptions);
         medicines.Should().NotBeNull();
-        // With random stock 0-500, there should be some below 10
         medicines!.Should().OnlyContain(m => m.StockQuantity < 10);
     }
 
@@ -216,7 +220,7 @@ public class PharmacyApiTests : IAsyncLifetime
         var response = await _httpClient.PostAsJsonAsync("/api/prescriptions", prescription);
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
-        var created = await response.Content.ReadFromJsonAsync<Prescription>();
+        var created = await response.Content.ReadFromJsonAsync<Prescription>(JsonOptions);
         created.Should().NotBeNull();
         created!.Status.Should().Be(PrescriptionStatus.Active);
     }
@@ -240,7 +244,6 @@ public class PharmacyApiTests : IAsyncLifetime
     [Fact]
     public async Task GetPrescription_ExistingId_ShouldReturnDetails()
     {
-        // Create a prescription first
         using var scope = _factory.Services.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<PharmacyDbContext>();
         var existingPrescription = await context.Prescriptions
@@ -250,7 +253,7 @@ public class PharmacyApiTests : IAsyncLifetime
         var response = await _httpClient.GetAsync($"/api/prescriptions/{existingPrescription.Id}");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var prescription = await response.Content.ReadFromJsonAsync<Prescription>();
+        var prescription = await response.Content.ReadFromJsonAsync<Prescription>(JsonOptions);
         prescription.Should().NotBeNull();
         prescription!.Items.Should().NotBeEmpty();
     }

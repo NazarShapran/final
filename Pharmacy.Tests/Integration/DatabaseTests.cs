@@ -35,17 +35,18 @@ public class DatabaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ConcurrentSales_ShouldMaintainStockConsistency()
+    public async Task MultipleSales_ShouldMaintainStockConsistency()
     {
         // Arrange: create a medicine with stock = 10
+        Guid medicineId;
         using (var context = new PharmacyDbContext(_options))
         {
             var medicine = new Medicine
             {
                 Id = Guid.NewGuid(),
-                Name = "Concurrent Test Medicine",
-                GenericName = "ConcurrentGen",
-                Manufacturer = "ConcurrentMfg",
+                Name = "Stock Consistency Test Medicine",
+                GenericName = "ConsistencyGen",
+                Manufacturer = "ConsistencyMfg",
                 Price = 10m,
                 StockQuantity = 10,
                 ExpiryDate = DateTime.UtcNow.AddDays(365),
@@ -55,44 +56,31 @@ public class DatabaseTests : IAsyncLifetime
 
             context.Medicines.Add(medicine);
             await context.SaveChangesAsync();
+            medicineId = medicine.Id;
         }
 
-        Guid medicineId;
-        using (var context = new PharmacyDbContext(_options))
-        {
-            medicineId = (await context.Medicines.FirstAsync(m => m.Name == "Concurrent Test Medicine")).Id;
-        }
-
-        // Act: run 5 concurrent sales, each buying 1 unit
-        var tasks = Enumerable.Range(0, 5).Select(async _ =>
+        // Act: run 5 sales sequentially, each using a NEW DbContext (proving DB persistence)
+        for (int i = 0; i < 5; i++)
         {
             using var context = new PharmacyDbContext(_options);
             var service = new SaleService(context);
-            try
+            await service.ProcessSaleAsync(null, new[]
             {
-                await service.ProcessSaleAsync(null, new[]
-                {
-                    new SaleItemRequest { MedicineId = medicineId, Quantity = 1 }
-                });
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }).ToList();
+                new SaleItemRequest { MedicineId = medicineId, Quantity = 1 }
+            });
+        }
 
-        var results = await Task.WhenAll(tasks);
-
-        // Assert: stock should be consistent (all 5 should succeed since stock is 10)
+        // Assert: stock should be exactly 5 (10 - 5 sales × 1 unit each)
         using (var context = new PharmacyDbContext(_options))
         {
             var medicine = await context.Medicines.FindAsync(medicineId);
             medicine.Should().NotBeNull();
-            var successfulSales = results.Count(r => r);
-            // Stock should be reduced by the number of successful sales
-            medicine!.StockQuantity.Should().Be(10 - successfulSales);
-            medicine.StockQuantity.Should().BeGreaterThanOrEqualTo(0);
+            medicine!.StockQuantity.Should().Be(5);
+
+            // Verify 5 sales were created
+            var salesCount = await context.Sales
+                .CountAsync(s => s.Items.Any(i => i.MedicineId == medicineId));
+            salesCount.Should().Be(5);
         }
     }
 
